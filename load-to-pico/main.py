@@ -117,17 +117,17 @@ def send_stepper_signal(list):
     IN4.value(list[5])
     show_on_LEDs([list[1], list[2], list[4], list[5]])
 
-def generator_disable():
+def disable_generator():
     RELAY1.value(1)
     RELAY2.value(1)
     print("generator disabled")
 
-def generator_enable():
+def enable_generator():
     RELAY1.value(0)
     RELAY2.value(0)
     print("generator enabled")
 
-def stepper_disable():
+def disable_stepper():
     send_stepper_signal([0, 0, 0, 0, 0, 0])
     print("stepper disabled")
 
@@ -150,15 +150,15 @@ def sweep_LEDs(times = 1, up = True, delay = 50):
             show_on_LEDs(L)
             utime.sleep_ms(delay)
 
-def hardware_setup(step_delay = 200):
+def initialize_hardware(step_delay = 200):
     print("beginning hardware setup process...")
-    generator_disable()
+    disable_generator()
     show_on_LEDs([1, 0, 0, 0])
     utime.sleep_ms(step_delay)
-    stepper_disable()
+    disable_stepper()
     show_on_LEDs([1, 1, 0, 0])
     utime.sleep_ms(step_delay)
-    generator_enable()
+    enable_generator()
     show_on_LEDs([1, 1, 1, 0])
     utime.sleep_ms(step_delay)
     print("\nhardware setup complete!\n")
@@ -166,64 +166,52 @@ def hardware_setup(step_delay = 200):
     flash_LEDs(2)
 
 # creates noticeable buffer time between killswitch triggers
-def temporary_killswitch_disable():
+def killswitch_pause():
     print("\nkill switch detected, disabling button (and system, for safety)...")
     show_on_LEDs([1, 1, 1, 1])
-    stepper_disable()
+    disable_stepper()
     show_on_LEDs([1, 1, 1, 1])
     utime.sleep_ms(50)
-    generator_disable()
+    disable_generator()
     utime.sleep_ms(2000)
     print("kill switch re-enabled")
     show_on_LEDs([0, 0, 0, 0])
 
-def connect_to_network(ssid = 'SHAW-E8C2'):
-
+def connect_to_WiFi_network(ssid = 'SHAW-E8C2'):
     sta_if = network.WLAN(network.STA_IF)
     print('connecting to WiFi network...')
     sta_if.active(True)
-
     try:
         sta_if.connect(ssid, known_wifi_passwords[ssid])
     except:
         print("WIFI CONNECTION ERROR - CHECK NETWORK NAME OR PASSWORD")
-
     while not sta_if.isconnected():
         print(sta_if.status())
         sweep_LEDs(1)
-
     print("network connected!")
     print('network configuration: ', sta_if.ifconfig())
     print()
     sweep_LEDs(1, False)
-
     return sta_if
 
 def move_stepper(steps_to_move = 200, CW = True, delay = MIN_STEP_DELAY):
-
     global generate
     global stepper_state
     global stepper_signals
-
     for step in range(steps_to_move):
-
         if generate is True:
             return False
-
         if CW is True:
             stepper_state = (stepper_state + 1) if stepper_state < 4 else 1
         elif CW is False:
             stepper_state = (stepper_state - 1) if stepper_state > 1 else 4
         else:
             raise Exception("CW case error: {}".format(CW))
-
         try:
             send_stepper_signal(stepper_signals[stepper_state])
         except:
             raise Exception("stepper_state case error: {}".format(stepper_state))
-
         utime.sleep_ms(delay)
-
     return True
 
 #########################################################################################
@@ -233,7 +221,7 @@ def move_stepper(steps_to_move = 200, CW = True, delay = MIN_STEP_DELAY):
 # deals with killswitch button trigger
 def killswitch_handler():
     global kill
-    temporary_killswitch_disable()
+    killswitch_pause()
     kill = False if kill is True else True
     handle_kill_state_change()
 
@@ -254,10 +242,10 @@ killswitch_button.irq(trigger = machine.Pin.IRQ_FALLING, handler = killswitch_ha
 generate_button.irq(trigger = machine.Pin.IRQ_FALLING, handler = generate_handler)
 
 # connect to wifi
-sta_if = connect_to_network(WIFI_NAME)
+sta_if = connect_to_WiFi_network(WIFI_NAME)
 
 # set hardware to initial state
-hardware_setup()
+initialize_hardware()
 
 #########################################################################################
 #################################### SET UP BLYNK #######################################
@@ -275,7 +263,7 @@ def blynk_connected():
     global kill
     print("Blynk server connected!")
     print("Updating Blynk server...")
-    send_ADC0()
+    update_generator_voltage()
     blynk_instance.virtual_write(GENERATE_SWITCH_VPIN, 1 if generate is True else 0)
     blynk_instance.virtual_write(KILLSWITCH_VPIN, 1 if kill is True else 0)
     print("Blynk server update complete. Starting system...\n")
@@ -284,7 +272,7 @@ def blynk_connected():
 @blynk_instance.on("V{}".format(KILLSWITCH_VPIN))
 def v2_write_handler(value):
     global kill
-    temporary_killswitch_disable()
+    killswitch_pause()
     if value[0] is "1":
         kill = True
     elif value[0] is "0":
@@ -308,8 +296,8 @@ def v0_write_handler(value):
 
 # HANDLERS FOR DATA GOING TO THE BLYNK DASHBOARD
 
-# updates the generator voltage label
-def send_ADC0():
+# updates the generator voltage label on the dashboard
+def update_generator_voltage():
     adc0_output = adc0.read_u16()/65535
     generator_voltage = 15*adc0_output
     print("ADC0: {d:.6f}, sending voltage: {v:2.4f}".format(d=adc0_output, v=generator_voltage))
@@ -325,7 +313,7 @@ def handle_kill_state_change():
         print("\nSYSTEM KILL COMPLETE\n")
     elif kill is False:
         print("\nRESTARTING SYSTEM\n")
-        hardware_setup()
+        initialize_hardware()
         generate = True
         was_generating = True
 
@@ -339,16 +327,16 @@ def handle_generate_state_change():
         was_generating = True
     elif generate is True:
         print("\nswitching to generate mode...\n")
-        stepper_disable()
+        disable_stepper()
         utime.sleep_ms(100)
-        generator_enable()
+        enable_generator()
         utime.sleep_ms(100)
         print()
 
 # SET UP BLYNK TIMER FOR PERIODIC EXECUTIONS
 
-blynk_dashboard_update_timer = BlynkTimer.BlynkTimer()
-blynk_dashboard_update_timer.set_interval(ADC_UPDATE_INTERVAL, send_ADC0)
+blynk_update_timer = BlynkTimer.BlynkTimer()
+blynk_update_timer.set_interval(ADC_UPDATE_INTERVAL, update_generator_voltage)
 
 #########################################################################################
 ###################################### MAIN LOOP ########################################
@@ -358,14 +346,14 @@ while True:
 
     # make sure Pico is connected to the internet
     if not sta_if.isconnected():
-        sta_if = connect_to_network(WIFI_NAME)
+        sta_if = connect_to_WiFi_network(WIFI_NAME)
 
     if kill is True:
         flash_LEDs(1, 500)
     elif kill is False:
         if generate is False:
             if was_generating is True:
-                generator_disable()
+                disable_generator()
                 was_generating = False
                 print("calibrating motor...")
                 move_stepper(20, True, MAX_STEP_DELAY)
@@ -380,4 +368,4 @@ while True:
             utime.sleep_ms(1000)
 
     blynk_instance.run()
-    blynk_dashboard_update_timer.run()
+    blynk_update_timer.run()
