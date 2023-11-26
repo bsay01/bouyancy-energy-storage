@@ -34,18 +34,18 @@ BLYNK_TEMPLATE_NAME = "Quickstart Template"
 BLYNK_AUTH_TOKEN = "NKV7_l21Ch2v0buSwwvqLU0zDpwA2dEP"
 
 GENERATE_SWITCH_VPIN = 0
-GENERATOR_VOLTAGE_VPIN = 1
+POWER_VPIN = 1
 KILLSWITCH_VPIN = 2
 
 ADC_UPDATE_INTERVAL = 5 # seconds
 
 #### WiFi Stuff ####
 
-WIFI_NAME = 'SHAW-E8C2'
+WIFI_NAME = 'the Groove Machine'
 
 known_wifi_passwords = {
     'the Groove Machine': 'wiggles101', # ben's phone
-    "Liams Iphone XR": 'colemansgimp',  # liam's phone
+    'Liams Iphone XR': 'colemansgimp',  # liam's phone
     'Lee': 'leeroijenkins',             # sam's phone
     'SHAW-E8C2': 'breezy2116fever'      # home network
 }
@@ -53,7 +53,7 @@ known_wifi_passwords = {
 #### Stepper Stuff ####
 
 MIN_STEP_DELAY = 8
-MAX_STEP_DELAY = 30
+MAX_STEP_DELAY = 20
 
 stepper_signals = {
     1 : [1, 1, 0, 1, 1, 0],
@@ -84,8 +84,9 @@ IN4 = machine.Pin(5, machine.Pin.OUT)
 RELAY1 = machine.Pin(14, machine.Pin.OUT)
 RELAY2 = machine.Pin(15, machine.Pin.OUT)
 
-# set up ADC0 to read the capacitor voltage (the generator circuit output voltage)
+# set up ADC0 to read voltage from amplifiers and ADC1 to read current from amplifiers
 adc0 = machine.ADC(machine.Pin(26))
+adc1 = machine.ADC(machine.Pin(27))
 
 #########################################################################################
 ################################### GLOBAL VARIABLES ####################################
@@ -118,12 +119,12 @@ def send_stepper_signal(list):
     show_on_LEDs([list[1], list[2], list[4], list[5]])
 
 def disable_generator():
-    RELAY1.value(1)
+    RELAY1.value(0)
     RELAY2.value(1)
     print("generator disabled")
 
 def enable_generator():
-    RELAY1.value(0)
+    RELAY1.value(1)
     RELAY2.value(0)
     print("generator enabled")
 
@@ -149,6 +150,7 @@ def sweep_LEDs(times = 1, up = True, delay = 50):
             L[x-1] = 1
             show_on_LEDs(L)
             utime.sleep_ms(delay)
+    show_on_LEDs([0, 0, 0, 0])
 
 def initialize_hardware(step_delay = 200):
     print("beginning hardware setup process...")
@@ -179,7 +181,7 @@ def killswitch_pause():
 
 def connect_to_WiFi_network(ssid = 'SHAW-E8C2'):
     sta_if = network.WLAN(network.STA_IF)
-    print('connecting to WiFi network...')
+    print('connecting to WiFi network "{}"...'.format(WIFI_NAME))
     sta_if.active(True)
     try:
         sta_if.connect(ssid, known_wifi_passwords[ssid])
@@ -187,7 +189,7 @@ def connect_to_WiFi_network(ssid = 'SHAW-E8C2'):
         print("WIFI CONNECTION ERROR - CHECK NETWORK NAME OR PASSWORD")
     while not sta_if.isconnected():
         print(sta_if.status())
-        sweep_LEDs(1)
+        sweep_LEDs(5)
     print("network connected!")
     print('network configuration: ', sta_if.ifconfig())
     print()
@@ -241,11 +243,11 @@ def generate_handler():
 killswitch_button.irq(trigger = machine.Pin.IRQ_FALLING, handler = killswitch_handler)
 generate_button.irq(trigger = machine.Pin.IRQ_FALLING, handler = generate_handler)
 
-# connect to wifi
-sta_if = connect_to_WiFi_network(WIFI_NAME)
-
 # set hardware to initial state
 initialize_hardware()
+
+# connect to wifi
+sta_if = connect_to_WiFi_network(WIFI_NAME)
 
 #########################################################################################
 #################################### SET UP BLYNK #######################################
@@ -263,7 +265,7 @@ def blynk_connected():
     global kill
     print("Blynk server connected!")
     print("Updating Blynk server...")
-    update_generator_voltage()
+    update_dashboard_power()
     blynk_instance.virtual_write(GENERATE_SWITCH_VPIN, 1 if generate is True else 0)
     blynk_instance.virtual_write(KILLSWITCH_VPIN, 1 if kill is True else 0)
     print("Blynk server update complete. Starting system...\n")
@@ -296,12 +298,15 @@ def v0_write_handler(value):
 
 # HANDLERS FOR DATA GOING TO THE BLYNK DASHBOARD
 
-# updates the generator voltage label on the dashboard
-def update_generator_voltage():
+# updates the power label on the dashboard
+def update_dashboard_power():
     adc0_output = adc0.read_u16()/65535
-    generator_voltage = 15*adc0_output
-    print("ADC0: {d:.6f}, sending voltage: {v:2.4f}".format(d=adc0_output, v=generator_voltage))
-    blynk_instance.virtual_write(GENERATOR_VOLTAGE_VPIN, generator_voltage)
+    adc1_output = adc0.read_u16()/65535
+    voltage = 20*adc0_output
+    current = 50*adc1_output
+    print("ADC0: {d:.6f}, voltage: {v:2.4f}  ".format(d=adc0_output, v=voltage))
+    print("ADC1: {d:.6f}, current: {c:2.4f}\n".format(d=adc1_output, c=current))
+    blynk_instance.virtual_write(POWER_VPIN, voltage*current)
 
 # sets up the system after a kill command is recieved / created
 def handle_kill_state_change():
@@ -336,7 +341,7 @@ def handle_generate_state_change():
 # SET UP BLYNK TIMER FOR PERIODIC EXECUTIONS
 
 blynk_update_timer = BlynkTimer.BlynkTimer()
-blynk_update_timer.set_interval(ADC_UPDATE_INTERVAL, update_generator_voltage)
+blynk_update_timer.set_interval(ADC_UPDATE_INTERVAL, update_dashboard_power)
 
 #########################################################################################
 ###################################### MAIN LOOP ########################################
@@ -356,11 +361,10 @@ while True:
                 disable_generator()
                 was_generating = False
                 print("calibrating motor...")
-                move_stepper(20, True, MAX_STEP_DELAY)
-                print("calibration complete! resetting...")
+                move_stepper(23, True, MAX_STEP_DELAY)
+                print("calibration complete! resetting...\n")
                 utime.sleep_ms(500)
-                move_stepper(15, False, MAX_STEP_DELAY)
-                print()
+                move_stepper(18, False, MIN_STEP_DELAY)
                 utime.sleep_ms(1000)
             move_stepper(100, True, MIN_STEP_DELAY)
             utime.sleep_ms(1000)
