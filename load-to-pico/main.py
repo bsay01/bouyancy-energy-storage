@@ -37,11 +37,11 @@ GENERATE_SWITCH_VPIN = 0
 POWER_VPIN = 1
 KILLSWITCH_VPIN = 2
 
-ADC_UPDATE_INTERVAL = 5 # seconds
+ADC_UPDATE_INTERVAL = 1 # seconds
 
 #### WiFi Stuff ####
 
-WIFI_NAME = 'the Groove Machine'
+WIFI_NAME = 'SHAW-E8C2'
 
 known_wifi_passwords = {
 	'the Groove Machine': 'wiggles101', # ben's phone
@@ -300,12 +300,27 @@ def v0_write_handler(value):
 
 # updates the power label on the dashboard
 def update_dashboard_power():
+	global generate
 	adc0_output = adc0.read_u16()/65535
 	adc1_output = adc0.read_u16()/65535
-	voltage = 20*adc0_output
-	current = 50*adc1_output
-	print("ADC0: {d:.6f}, voltage: {v:2.4f}  ".format(d=adc0_output, v=voltage))
-	print("ADC1: {d:.6f}, current: {c:2.4f}\n".format(d=adc1_output, c=current))
+	#voltage = 20*adc0_output
+	#current = 50*adc1_output
+	
+	#NEED IF/ELSE STATEMENT FOR DIFFERENT VALUES OF VOLTAGE AND CURRENT FOR GENERATOR AND VOLTAGE MODE
+	# FOR GENERATOR VOLTAGE: division = 4, output voltage (V) = adc0_ouptut*3.3V*4
+	# FOR GENERATOR CURRENT: gain=100, resistor =0.6 ohms output current(A) = adc1_output*3.3V/0.6Ohms/100(gain)
+	
+	# FOR MOTOR Voltage division = 4, output voltage (V) = adc0_output*3.3V*4
+	# FOR MOTOR Current gain=10, resistor =0.6 ohms output current(A) = adc1_output*3.3V/0.6 Ohms/10(gain)
+	if kill is True:
+		voltage = 4*3.3*adc0_output
+		current = (3.3*0.6/100)*adc1_output
+	else:
+		voltage = 4*3.3*adc0_output
+		current = (3.3*0.4/10)*adc1_output   
+	
+	print("ADC0: {d:.6f}, voltage: {v:2.4f} V  ".format(d=adc0_output, v=voltage))
+	print("ADC1: {d:.6f}, current: {c:2.4f} mA\n".format(d=adc1_output, c=current*1000))
 	blynk_instance.virtual_write(POWER_VPIN, voltage*current)
 
 # sets up the system after a kill command is recieved / created
