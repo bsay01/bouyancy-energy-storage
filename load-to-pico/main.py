@@ -27,6 +27,9 @@ import utime, machine, BlynkLib, network, BlynkTimer
 ####################################### DEFINES #########################################
 #########################################################################################
 
+interrupt_state = machine.disable_irq()
+machine.enable_irq(interrupt_state)
+
 #### Blynk globals ####
 
 BLYNK_TEMPLATE_ID = "TMPL2UsApXL1s"
@@ -42,8 +45,8 @@ BLYNK_UPDATE_INTERVAL = 5 # seconds
 #### ADC globals ####
 ADC_UPDATE_INTERVAL = 10 # milliseconds
 N_adc_samples = 1 # number of ADC samples since last blynk update
-adc_sums = [0, 0] # sums of ADC samples for averaging
-adc_avgs = [0, 0] # ADC averages
+adc_sums = [0.0, 0.0] # sums of ADC samples for averaging
+adc_avgs = [0.0, 0.0] # ADC averages
 
 #### WiFi Stuff ####
 
@@ -123,8 +126,6 @@ def send_stepper_signal(list):
 	global stepper_pins
 	for pin, value in zip(stepper_pins, list):
 		pin.value(value)
-	list.pop(3)
-	list.pop(0)
 	show_on_LEDs([list[1], list[2], list[4], list[5]])
 
 def disable_generator():
@@ -231,7 +232,6 @@ def move_stepper(steps_to_move = 200, CW = True, delay = MIN_STEP_DELAY):
 
 def calibrate_stepper():
 	disable_generator()
-	was_generating = False
 	print("calibrating motor...")
 	move_stepper(23, True, MAX_STEP_DELAY)
 	print("calibration complete! resetting...\n")
@@ -323,7 +323,6 @@ def v0_write_handler(value):
 
 # updates the power label on the dashboard
 def update_dashboard_power():
-
 	if N_adc_samples is 0:
 		print("ADC averaging incomplete - dashboard not updated\n")
 	else:
@@ -333,7 +332,7 @@ def update_dashboard_power():
 		global adc_avgs
 
 		adc_avgs = [sum/N_adc_samples for sum in adc_sums]
-		adc_sums = [0 for sum in adc_sums]
+		adc_sums = [0.0 for sum in adc_sums]
 		N_adc_samples = 0
 
 		if generate is True:
@@ -349,14 +348,6 @@ def update_dashboard_power():
 		print("ADC1: {d:.6f}, current: {c:2.4f} mA".format(d=adc_avgs[0], c=current*1000))
 		print("{n:2.4f} samples averaged\n" .format(n=N_adc_samples))
 		blynk_instance.virtual_write(POWER_VPIN, voltage*current)
-
-# samples the ADC to ensure value sent to dashboard is averaged
-def sample_adcs():
-	global adc_sums
-	global adc
-	global N_adc_samples
-	adc_sums = [sum + source.read_u16()/65535 for sum, source in zip(adc_sums, adc)]
-	N_adc_samples = N_adc_samples + 1
 
 # sets up the system after a kill command is recieved / created
 def handle_kill_state_change():
@@ -395,6 +386,14 @@ blynk_update_timer.set_interval(BLYNK_UPDATE_INTERVAL, update_dashboard_power())
 
 # SET UP HARDWARE TIMER TO SAMPLE ADCS PERIODICALLY
 
+# samples and sums ADC values for later averaging
+def sample_adcs():
+	global adc_sums
+	global adc
+	global N_adc_samples
+	adc_sums = [sum + source.read_u16()/65535.0 for sum, source in zip(adc_sums, adc)]
+	N_adc_samples = N_adc_samples + 1
+
 ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs())
 
 #########################################################################################
@@ -408,12 +407,20 @@ while True:
 		sta_if = connect_to_WiFi_network(WIFI_NAME)
 
 	if kill is True:
+
 		flash_LEDs(1, 500)
+
 	elif kill is False:
+
+		# if we are in motor mode and we were generating before
 		if generate is False and was_generating is True:
+
 			#calibrate_stepper()
+
+			# store a bunch of power and wait for the generate signal
 			move_stepper(STEPS_TO_BOTTOM, True, MIN_STEP_DELAY)
 			brake_stepper()
+			was_generating = False
 
 	blynk_instance.run()
 	blynk_update_timer.run()
