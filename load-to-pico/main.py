@@ -42,7 +42,7 @@ BLYNK_UPDATE_INTERVAL = 5 # seconds
 #### ADC globals ####
 ADC_UPDATE_INTERVAL = 10 # milliseconds
 N_adc_samples = 1 # number of ADC samples since last blynk update
-adc_sums = 0 # sum of ADC samples for averaging
+adc0_sum = 0 # sum of ADC samples for averaging
 adc1_sum = 0
 
 #### WiFi Stuff ####
