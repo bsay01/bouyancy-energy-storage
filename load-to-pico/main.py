@@ -23,6 +23,8 @@
 
 import utime, machine, BlynkLib, network, BlynkTimer
 
+from machine import Timer
+
 #########################################################################################
 ####################################### DEFINES #########################################
 #########################################################################################
@@ -37,11 +39,19 @@ GENERATE_SWITCH_VPIN = 0
 POWER_VPIN = 1
 KILLSWITCH_VPIN = 2
 
-ADC_UPDATE_INTERVAL = 5 # seconds
+
+BLYNK_UPDATE_INTERVAL = 5 # seconds
+
+
+#### ADC globals ####
+ADC_UPDATE_INTERVAL=10 #milliseconds
+N_adc_samples=1 #Counter for number of ADC samples since last blynk update
+adc0_sum=0 #Sum of all ADC values
+adc1_sum=0
 
 #### WiFi Stuff ####
 
-WIFI_NAME = 'the Groove Machine'
+WIFI_NAME = 'SHAW-E8C2'
 
 known_wifi_passwords = {
 	'the Groove Machine': 'wiggles101', # ben's phone
@@ -61,6 +71,7 @@ stepper_signals = {
 	3 : [1, 0, 1, 1, 0, 1],
 	4 : [1, 1, 0, 1, 0, 1]
 }
+
 
 #########################################################################################
 ################################### PIN DEFINITIONS #####################################
@@ -216,6 +227,12 @@ def move_stepper(steps_to_move = 200, CW = True, delay = MIN_STEP_DELAY):
 		utime.sleep_ms(delay)
 	return True
 
+#Function to hold stepper state (both coils engaged but not on)
+def hold_stepper(time_to_hold=200):
+	global stepper_state
+	send_stepper_signal([1, 0, 0, 1, 0, 0])
+	utime.sleep_ms(time_to_hold) #Modify somehow to not sleep
+
 #########################################################################################
 ##################################### INTERRUPTS ########################################
 #########################################################################################
@@ -241,7 +258,7 @@ def generate_handler():
 
 # define interrupts
 killswitch_button.irq(trigger = machine.Pin.IRQ_FALLING, handler = killswitch_handler)
-generate_button.irq(trigger = machine.Pin.IRQ_FALLING, handler = generate_handler)
+generate_button.irq(trigger = machine.Pin.IRQ_FALLING,handler = generate_handler)
 
 # set hardware to initial state
 initialize_hardware()
@@ -300,13 +317,38 @@ def v0_write_handler(value):
 
 # updates the power label on the dashboard
 def update_dashboard_power():
-	adc0_output = adc0.read_u16()/65535
-	adc1_output = adc0.read_u16()/65535
-	voltage = 20*adc0_output
-	current = 50*adc1_output
-	print("ADC0: {d:.6f}, voltage: {v:2.4f}  ".format(d=adc0_output, v=voltage))
-	print("ADC1: {d:.6f}, current: {c:2.4f}\n".format(d=adc1_output, c=current))
+	global generate
+	global N_adc_samples
+	global adc0_sum
+	global adc1_sum
+	
+	adc0_output_avg=adc0_sum/N_adc_samples
+	adc1_output_avg=adc1_sum/N_adc_samples
+	adc0_sum=0
+	adc1_sum=0
+	N_adc_samples=1 # 1 To avoid divide by 0 errors if the sample function isn't reached
+	
+	if generate is True:
+		voltage = 4*3.3*adc1_output_avg
+		current = (3.3/(0.55 *100))*adc0_output_avg
+	else:
+		voltage = 4*3.3*adc1_output_avg
+		current = (3.3/(0.5*10))*adc0_output_avg
+	
+	print("ADC0: {d:.6f}, voltage: {v:2.4f} V  ".format(d=adc1_output_avg, v=voltage))
+	print("ADC1: {d:.6f}, current: {c:2.4f} mA\n".format(d=adc0_output_avg, c=current*1000))
 	blynk_instance.virtual_write(POWER_VPIN, voltage*current)
+
+#Samples the ADC to ensure value sent to dashboard is averaged
+def sample_adcs(Source):
+	global N_adc_samples
+	global adc0_sum
+	global adc1_sum
+	
+	adc0_sum = adc0_sum + adc0.read_u16()/65535
+	adc1_sum = adc1_sum + adc1.read_u16()/65535
+	N_adc_samples=N_adc_samples+1
+	#print("Number of Samples Taken: {n:2.4f}" .format(n=N_adc_samples))
 
 # sets up the system after a kill command is recieved / created
 def handle_kill_state_change():
@@ -341,7 +383,11 @@ def handle_generate_state_change():
 # SET UP BLYNK TIMER FOR PERIODIC EXECUTIONS
 
 blynk_update_timer = BlynkTimer.BlynkTimer()
-blynk_update_timer.set_interval(ADC_UPDATE_INTERVAL, update_dashboard_power)
+blynk_update_timer.set_interval(BLYNK_UPDATE_INTERVAL, update_dashboard_power)
+
+#SET UP HARDWARE TIMER TO EXECTUE ADC AVERAGING PERIODICALLY
+
+ADC_timer = Timer(period=ADC_UPDATE_INTERVAL, mode=Timer.PERIODIC, callback=sample_adcs)
 
 #########################################################################################
 ###################################### MAIN LOOP ########################################
@@ -366,10 +412,10 @@ while True:
 				utime.sleep_ms(500)
 				move_stepper(18, False, MIN_STEP_DELAY)
 				utime.sleep_ms(1000)
-			move_stepper(100, True, MIN_STEP_DELAY)
-			utime.sleep_ms(1000)
-			move_stepper(100, False, MIN_STEP_DELAY)
-			utime.sleep_ms(1000)
+			move_stepper(800, True, MIN_STEP_DELAY)
+			hold_stepper(10000)
+			move_stepper(800, False, MIN_STEP_DELAY)
+			hold_stepper(10000)
 
 	blynk_instance.run()
 	blynk_update_timer.run()
