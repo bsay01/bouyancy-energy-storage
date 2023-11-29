@@ -70,9 +70,8 @@ stepper_signals = {
 	2 : [1, 0, 1, 1, 1, 0],
 	3:  [1, 0, 1, 1, 0, 1],
 	4 : [1, 1, 0, 1, 0, 1],
-	5 : [1, 0, 0, 0, 0, 0] #Hold state
-    
 }
+
 
 #########################################################################################
 ################################### PIN DEFINITIONS #####################################
@@ -231,8 +230,8 @@ def move_stepper(steps_to_move = 200, CW = True, delay = MIN_STEP_DELAY):
 #Function to hold stepper state (both coils engaged but not on)
 def hold_stepper(time_to_hold=200):
 	global stepper_state
-	stepper_state=5
-	utime.sleep_ms(time_to_hold)
+	send_stepper_signal([1, 0, 0, 1, 0, 0])
+	utime.sleep_ms(time_to_hold) #Modify somehow to not sleep
 
 #########################################################################################
 ##################################### INTERRUPTS ########################################
@@ -258,8 +257,8 @@ def generate_handler():
 #########################################################################################
 
 # define interrupts
-killswitch_button.irq(handler = killswitch_handler, trigger = machine.Pin.IRQ_FALLING)
-generate_button.irq(handler = generate_handler, trigger = machine.Pin.IRQ_FALLING)
+killswitch_button.irq(trigger = machine.Pin.IRQ_FALLING, handler = killswitch_handler)
+generate_button.irq(trigger = machine.Pin.IRQ_FALLING,handler = generate_handler)
 
 # set hardware to initial state
 initialize_hardware()
@@ -314,9 +313,7 @@ def v0_write_handler(value):
 		raise Exception("generate case error on Blynk switch: {}".format(value[0]))
 	handle_generate_state_change()
 
-
 # HANDLERS FOR DATA GOING TO THE BLYNK DASHBOARD
-
 
 # updates the power label on the dashboard
 def update_dashboard_power():
@@ -329,8 +326,9 @@ def update_dashboard_power():
 	adc1_output_avg=adc1_sum/N_adc_samples
 	adc0_sum=0
 	adc1_sum=0
+	N_adc_samples=0
 	
-	if kill is True:
+	if generate is True:
 		voltage = 4*3.3*adc1_output_avg
 		current = (3.3/(0.55 *100))*adc0_output_avg
 	else:
@@ -339,8 +337,6 @@ def update_dashboard_power():
 	
 	print("ADC0: {d:.6f}, voltage: {v:2.4f} V  ".format(d=adc1_output_avg, v=voltage))
 	print("ADC1: {d:.6f}, current: {c:2.4f} mA\n".format(d=adc0_output_avg, c=current*1000))
-	print("Number of Samples Taken: {n:2.4f}" .format(n=N_adc_samples))
-	N_adc_samples=1
 	blynk_instance.virtual_write(POWER_VPIN, voltage*current)
 
 #Samples the ADC to ensure value sent to dashboard is averaged
@@ -389,7 +385,7 @@ def handle_generate_state_change():
 blynk_update_timer = BlynkTimer.BlynkTimer()
 blynk_update_timer.set_interval(BLYNK_UPDATE_INTERVAL, update_dashboard_power)
 
-#SET UP BLYNK TIMER TO POLL ADC FOR AVERAGING
+#SET UP HARDWARE TIMER TO EXECTUE ADC AVERAGING PERIODICALLY
 
 ADC_timer = Timer(period=ADC_UPDATE_INTERVAL, mode=Timer.PERIODIC, callback=sample_adcs)
 
