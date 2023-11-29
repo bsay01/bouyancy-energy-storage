@@ -61,6 +61,8 @@ known_wifi_passwords = {
 MIN_STEP_DELAY = 8
 MAX_STEP_DELAY = 20
 
+STEPS_TO_BOTTOM = 800
+
 stepper_signals = {
 	1 : [1, 1, 0, 1, 1, 0],
 	2 : [1, 0, 1, 1, 1, 0],
@@ -75,17 +77,21 @@ stepper_signals = {
 killswitch_button = machine.Pin(16, machine.Pin.IN, machine.Pin.PULL_UP)
 generate_button = machine.Pin(17, machine.Pin.IN, machine.Pin.PULL_UP)
 
-LED1 = machine.Pin(21, machine.Pin.OUT, machine.Pin.PULL_DOWN)
-LED2 = machine.Pin(20, machine.Pin.OUT, machine.Pin.PULL_DOWN)
-LED3 = machine.Pin(19, machine.Pin.OUT, machine.Pin.PULL_DOWN)
-LED4 = machine.Pin(18, machine.Pin.OUT, machine.Pin.PULL_DOWN)
+LED_pins = [
+	machine.Pin(18, machine.Pin.OUT, machine.Pin.PULL_DOWN), # LED1
+	machine.Pin(19, machine.Pin.OUT, machine.Pin.PULL_DOWN), # LED2
+	machine.Pin(20, machine.Pin.OUT, machine.Pin.PULL_DOWN), # LED3
+	machine.Pin(21, machine.Pin.OUT, machine.Pin.PULL_DOWN)  # LED4
+]
 
-ENA = machine.Pin(0, machine.Pin.OUT)
-ENB = machine.Pin(1, machine.Pin.OUT)
-IN1 = machine.Pin(2, machine.Pin.OUT)
-IN2 = machine.Pin(3, machine.Pin.OUT)
-IN3 = machine.Pin(4, machine.Pin.OUT)
-IN4 = machine.Pin(5, machine.Pin.OUT)
+stepper_pins = [
+	machine.Pin(0, machine.Pin.OUT), # ENA
+	machine.Pin(2, machine.Pin.OUT), # IN1
+	machine.Pin(3, machine.Pin.OUT), # IN2
+	machine.Pin(1, machine.Pin.OUT), # ENB
+	machine.Pin(4, machine.Pin.OUT), # IN3
+	machine.Pin(5, machine.Pin.OUT)  # IN4
+]
 
 RELAY1 = machine.Pin(14, machine.Pin.OUT)
 RELAY2 = machine.Pin(15, machine.Pin.OUT)
@@ -109,28 +115,26 @@ kill = False
 #########################################################################################
 
 def show_on_LEDs(list):
-	LED1.value(list[3])
-	LED2.value(list[2])
-	LED3.value(list[1])
-	LED4.value(list[0])
+	global LED_pins
+	for pin, value in zip(LED_pins, list):
+		pin.value(value)
 
 def send_stepper_signal(list):
-	ENA.value(list[0])
-	IN1.value(list[1])
-	IN2.value(list[2])
-	ENB.value(list[3])
-	IN3.value(list[4])
-	IN4.value(list[5])
+	global stepper_pins
+	for pin, value in zip(stepper_pins, list):
+		pin.value(value)
+	list.pop(3)
+	list.pop(0)
 	show_on_LEDs([list[1], list[2], list[4], list[5]])
 
 def disable_generator():
-	RELAY1.value(0)
-	RELAY2.value(1)
+	RELAY1.off()
+	RELAY2.on()
 	print("generator disabled")
 
 def enable_generator():
-	RELAY1.value(1)
-	RELAY2.value(0)
+	RELAY1.on()
+	RELAY2.off()
 	print("generator enabled")
 
 def disable_stepper():
@@ -224,6 +228,16 @@ def move_stepper(steps_to_move = 200, CW = True, delay = MIN_STEP_DELAY):
 			raise Exception("stepper_state case error: {}".format(stepper_state))
 		utime.sleep_ms(delay)
 	return True
+
+def calibrate_stepper():
+	disable_generator()
+	was_generating = False
+	print("calibrating motor...")
+	move_stepper(23, True, MAX_STEP_DELAY)
+	print("calibration complete! resetting...\n")
+	utime.sleep_ms(500)
+	move_stepper(18, False, MIN_STEP_DELAY)
+	utime.sleep_ms(1000)
 
 #########################################################################################
 ##################################### INTERRUPTS ########################################
@@ -377,11 +391,11 @@ def handle_generate_state_change():
 # SET UP BLYNK TIMER FOR PERIODIC EXECUTIONS
 
 blynk_update_timer = BlynkTimer.BlynkTimer()
-blynk_update_timer.set_interval(BLYNK_UPDATE_INTERVAL, update_dashboard_power)
+blynk_update_timer.set_interval(BLYNK_UPDATE_INTERVAL, update_dashboard_power())
 
-#SET UP HARDWARE TIMER TO EXECTUE ADC AVERAGING PERIODICALLY
+# SET UP HARDWARE TIMER TO SAMPLE ADCS PERIODICALLY
 
-ADC_timer = machine.Timer(period=ADC_UPDATE_INTERVAL, mode=machine.Timer.PERIODIC, callback=sample_adcs)
+ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs())
 
 #########################################################################################
 ###################################### MAIN LOOP ########################################
@@ -396,22 +410,10 @@ while True:
 	if kill is True:
 		flash_LEDs(1, 500)
 	elif kill is False:
-		if generate is False:
-			if was_generating is True:
-				disable_generator()
-				was_generating = False
-				print("calibrating motor...")
-				move_stepper(23, True, MAX_STEP_DELAY)
-				print("calibration complete! resetting...\n")
-				utime.sleep_ms(500)
-				move_stepper(18, False, MIN_STEP_DELAY)
-				utime.sleep_ms(1000)
-			move_stepper(800, True, MIN_STEP_DELAY)
+		if generate is False and was_generating is True:
+			#calibrate_stepper()
+			move_stepper(STEPS_TO_BOTTOM, True, MIN_STEP_DELAY)
 			brake_stepper()
-			utime.sleep_ms(10000)
-			move_stepper(800, False, MIN_STEP_DELAY)
-			brake_stepper()
-			utime.sleep_ms(10000)
 
 	blynk_instance.run()
 	blynk_update_timer.run()
