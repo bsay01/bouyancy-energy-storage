@@ -42,8 +42,8 @@ BLYNK_UPDATE_INTERVAL = 5 # seconds
 #### ADC globals ####
 ADC_UPDATE_INTERVAL = 10 # milliseconds
 N_adc_samples = 1 # number of ADC samples since last blynk update
-adc0_sum = 0 # sum of ADC samples for averaging
-adc1_sum = 0
+adc_sums = [0, 0] # sums of ADC samples for averaging
+adc_avgs = [0, 0] # ADC averages
 
 #### WiFi Stuff ####
 
@@ -91,8 +91,7 @@ RELAY1 = machine.Pin(14, machine.Pin.OUT)
 RELAY2 = machine.Pin(15, machine.Pin.OUT)
 
 # set up ADC0 to read voltage from amplifiers and ADC1 to read current from amplifiers
-adc0 = machine.ADC(machine.Pin(26))
-adc1 = machine.ADC(machine.Pin(27))
+adc = [machine.ADC(machine.Pin(26)), machine.ADC(machine.Pin(27))]
 
 #########################################################################################
 ################################### GLOBAL VARIABLES ####################################
@@ -316,38 +315,33 @@ def update_dashboard_power():
 	else:
 		global generate
 		global N_adc_samples
-		global adc0_sum
-		global adc1_sum
+		global adc_sums
+		global adc_avgs
 
-		adc0_output_avg = adc0_sum/N_adc_samples
-		adc1_output_avg = adc1_sum/N_adc_samples
-		adc0_sum = 0
-		adc1_sum = 0
+		adc_avgs = [sum/N_adc_samples for sum in adc_sums]
+		adc_sums = [0 for sum in adc_sums]
 		N_adc_samples = 0
 
 		if generate is True:
-			voltage = 4*3.3*adc1_output_avg
-			current = (3.3/(0.55 *100))*adc0_output_avg
+			current = (3.3/(0.55 *100))*adc_avgs[0]
+			voltage = 4*3.3*adc_avgs[1]
 			print("GENERATOR:")
 		else:
-			voltage = 4*3.3*adc1_output_avg
-			current = (3.3/(0.5*10))*adc0_output_avg
+			current = (3.3/(0.5*10))*adc_avgs[0]
+			voltage = 4*3.3*adc_avgs[1]
 			print("MOTOR:")
 
-		print("ADC0: {d:.6f}, voltage: {v:2.4f} V  ".format(d=adc1_output_avg, v=voltage))
-		print("ADC1: {d:.6f}, current: {c:2.4f} mA".format(d=adc0_output_avg, c=current*1000))
+		print("ADC0: {d:.6f}, voltage: {v:2.4f} V  ".format(d=adc_avgs[1], v=voltage))
+		print("ADC1: {d:.6f}, current: {c:2.4f} mA".format(d=adc_avgs[0], c=current*1000))
 		print("{n:2.4f} samples averaged\n" .format(n=N_adc_samples))
 		blynk_instance.virtual_write(POWER_VPIN, voltage*current)
 
 # samples the ADC to ensure value sent to dashboard is averaged
 def sample_adcs():
+	global adc_sums
+	global adc
 	global N_adc_samples
-	global adc0_sum
-	global adc1_sum
-
-	adc0_sum = adc0_sum + adc0.read_u16()/65535
-	adc1_sum = adc1_sum + adc1.read_u16()/65535
-
+	adc_sums = [sum + source.read_u16()/65535 for sum, source in zip(adc_sums, adc)]
 	N_adc_samples = N_adc_samples + 1
 
 # sets up the system after a kill command is recieved / created
