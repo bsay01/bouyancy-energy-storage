@@ -68,7 +68,7 @@ MAX_STEP_DELAY = 20
 stepper_signals = {
 	1 : [1, 1, 0, 1, 1, 0],
 	2 : [1, 0, 1, 1, 1, 0],
-	3:  [1, 0, 1, 1, 0, 1],
+	3 : [1, 0, 1, 1, 0, 1],
 	4 : [1, 1, 0, 1, 0, 1],
 }
 
@@ -326,7 +326,7 @@ def update_dashboard_power():
 	adc1_output_avg=adc1_sum/N_adc_samples
 	adc0_sum=0
 	adc1_sum=0
-	N_adc_samples=0
+	N_adc_samples=1 # 1 To avoid divide by 0 errors if the sample function isn't reached
 	
 	if generate is True:
 		voltage = 4*3.3*adc1_output_avg
