@@ -21,7 +21,7 @@
 
 """
 
-import utime, machine, BlynkLib, network, BlynkTimer
+import utime, machine, BlynkLib, network, BlynkTimer, _thread
 
 #########################################################################################
 ####################################### DEFINES #########################################
@@ -43,7 +43,7 @@ KILLSWITCH_VPIN = 2
 BLYNK_UPDATE_INTERVAL = 5 # seconds
 
 #### ADC globals ####
-ADC_UPDATE_INTERVAL = 10 # milliseconds
+ADC_UPDATE_INTERVAL = 20 # milliseconds
 N_adc_samples = 1 # number of ADC samples since last blynk update
 adc_sums = [0.0, 0.0] # sums of ADC samples for averaging
 adc_avgs = [0.0, 0.0] # ADC averages
@@ -64,7 +64,8 @@ known_wifi_passwords = {
 MIN_STEP_DELAY = 8
 MAX_STEP_DELAY = 20
 
-STEPS_TO_BOTTOM = 800
+STEPS_TO_BOTTOM = 2400
+SPIN_CW = False
 
 stepper_signals = {
     1 : [1, 1, 0, 1, 1, 0],
@@ -96,11 +97,13 @@ stepper_pins = [
     machine.Pin(5, machine.Pin.OUT)  # IN4
 ]
 
-RELAY1 = machine.Pin(14, machine.Pin.OUT)
-RELAY2 = machine.Pin(15, machine.Pin.OUT)
+RELAY1 = machine.Pin(14, machine.Pin.OUT, machine.Pin.PULL_DOWN)
+RELAY2 = machine.Pin(15, machine.Pin.OUT, machine.Pin.PULL_DOWN)
 
 # set up ADC0 to read voltage from amplifiers and ADC1 to read current from amplifiers
-adc = [machine.ADC(machine.Pin(26)), machine.ADC(machine.Pin(27))]
+#adc = [machine.ADC(machine.Pin(26)), machine.ADC(machine.Pin(27))]
+adc0 = machine.ADC(machine.Pin(26))
+adc1 = machine.ADC(machine.Pin(27))
 
 #########################################################################################
 ################################### GLOBAL VARIABLES ####################################
@@ -228,6 +231,9 @@ def move_stepper(steps_to_move = 200, CW = True, delay = MIN_STEP_DELAY):
         except:
             raise Exception("stepper_state case error: {}".format(stepper_state))
         utime.sleep_ms(delay)
+        #blynk_instance.run()
+        #blynk_update_timer.run()
+
     return True
 
 def calibrate_stepper():
@@ -278,6 +284,7 @@ sta_if = connect_to_WiFi_network(WIFI_NAME)
 
 print("Initializing Blynk instance...")
 blynk_instance = BlynkLib.Blynk(BLYNK_AUTH_TOKEN, insecure = True)
+#blynk_instance = BlynkLib.Blynk(BLYNK_AUTH_TOKEN)
 
 # HANDLERS FOR DATA COMING FROM THE BLYNK DASHBOARD
 
@@ -332,7 +339,6 @@ def update_dashboard_power():
     else:
         adc_avgs = [sum/N_adc_samples for sum in adc_sums]
         adc_sums = [0.0 for sum in adc_sums]
-        N_adc_samples = 0
 
         if generate is True:
             current = (3.3/(0.55 *100))*adc_avgs[0]
@@ -345,7 +351,8 @@ def update_dashboard_power():
 
         print("ADC0: {d:.6f}, voltage: {v:2.4f} V  ".format(d=adc_avgs[1], v=voltage))
         print("ADC1: {d:.6f}, current: {c:2.4f} mA".format(d=adc_avgs[0], c=current*1000))
-        print("{n:2.4f} samples averaged\n" .format(n=N_adc_samples))
+        print("{n} samples averaged\n" .format(n=N_adc_samples))
+        N_adc_samples = 0
         blynk_instance.virtual_write(POWER_VPIN, voltage*current)
 
 # sets up the system after a kill command is recieved / created
@@ -366,10 +373,14 @@ def handle_kill_state_change():
 def handle_generate_state_change():
     global generate
     global was_generating
+    global N_adc_samples
+    global adc_sums
     blynk_instance.virtual_write(GENERATE_SWITCH_VPIN, 1 if generate is True else 0)
     if generate is False:
         print("\nswitching to motor mode...\n")
         was_generating = True
+        disable_generator()
+        utime.sleep_ms(200)
     elif generate is True:
         print("\nswitching to generate mode...\n")
         disable_stepper()
@@ -377,27 +388,44 @@ def handle_generate_state_change():
         enable_generator()
         utime.sleep_ms(100)
         print()
+    adc_sums[0] = 0
+    adc_sums[1] = 0
+    N_adc_samples = 0
 
 # SET UP BLYNK TIMER FOR PERIODIC EXECUTIONS
 
 blynk_update_timer = BlynkTimer.BlynkTimer()
-blynk_update_timer.set_interval(BLYNK_UPDATE_INTERVAL, update_dashboard_power())
+blynk_update_timer.set_interval(BLYNK_UPDATE_INTERVAL, update_dashboard_power)
 
 # SET UP HARDWARE TIMER TO SAMPLE ADCS PERIODICALLY
 
 # samples and sums ADC values for later averaging
-def sample_adcs():
+def sample_adcs(void):
     global adc_sums
-    global adc
+    #global adc0
+    #global adc1
     global N_adc_samples
-    adc_sums = [sum + source.read_u16()/65535.0 for sum, source in zip(adc_sums, adc)]
+    try:
+        #adc_sums = [sum + source.read_u16()/65535.0 for sum, source in zip(adc_sums, adc)]
+        adc_sums[0] = adc_sums[0] + adc0.read_u16()/65535
+        adc_sums[1] = adc_sums[1] + adc1.read_u16()/65535
+    except:
+        raise Exception("ADC error")
     N_adc_samples = N_adc_samples + 1
 
-ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs())
+#ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs)
 
 #########################################################################################
 ###################################### MAIN LOOP ########################################
 #########################################################################################
+
+def second_thread(bi, bt):
+    ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs)
+    while True:
+        bi.run()
+        bt.run()
+
+_thread.start_new_thread(second_thread, (blynk_instance, blynk_update_timer))
 
 while True:
 
@@ -417,9 +445,10 @@ while True:
             #calibrate_stepper()
 
             # store a bunch of power and wait for the generate signal
-            move_stepper(STEPS_TO_BOTTOM, True, MIN_STEP_DELAY)
-            brake_stepper()
+            move_stepper(STEPS_TO_BOTTOM, SPIN_CW, MIN_STEP_DELAY)
+            #brake_stepper()
             was_generating = False
 
-    blynk_instance.run()
-    blynk_update_timer.run()
+    #utime.sleep_ms(20)
+    #blynk_instance.run()
+    #blynk_update_timer.run()
