@@ -129,13 +129,13 @@ def send_stepper_signal(list):
 	show_on_LEDs([list[1], list[2], list[4], list[5]])
 
 def disable_generator():
-	RELAY1.off()
-	RELAY2.on()
+	RELAY1.value(0)
+	RELAY2.value(1)
 	print("generator disabled")
 
 def enable_generator():
-	RELAY1.on()
-	RELAY2.off()
+	RELAY1.value(1)
+	RELAY2.value(0)
 	print("generator enabled")
 
 def disable_stepper():
