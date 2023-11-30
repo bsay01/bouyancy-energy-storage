@@ -96,7 +96,7 @@ stepper_pins = [
 	machine.Pin(5, machine.Pin.OUT)  # IN4
 ]
 
-RELAY1 = machine.Pin(14, machine.Pin.OUT)
+RELAY1 = machine.Pin(14, machine.Pin.OUT) #NOT NEEDED BOTH RELAYS ENABLED FROM SAME PIN
 RELAY2 = machine.Pin(15, machine.Pin.OUT)
 
 # set up ADC0 to read voltage from amplifiers and ADC1 to read current from amplifiers
@@ -129,13 +129,13 @@ def send_stepper_signal(list):
 	show_on_LEDs([list[1], list[2], list[4], list[5]])
 
 def disable_generator():
-	RELAY1.off()
-	RELAY2.on()
+	RELAY1.value(0)
+	RELAY2.value(1)
 	print("generator disabled")
 
 def enable_generator():
-	RELAY1.on()
-	RELAY2.off()
+	RELAY1.value(1)
+	RELAY2.value(0)
 	print("generator enabled")
 
 def disable_stepper():
@@ -323,17 +323,17 @@ def v0_write_handler(value):
 
 # updates the power label on the dashboard
 def update_dashboard_power():
+	global generate
+	global N_adc_samples
+	global adc_sums
+	global adc_avgs
+	
 	if N_adc_samples is 0:
 		print("ADC averaging incomplete - dashboard not updated\n")
 	else:
-		global generate
-		global N_adc_samples
-		global adc_sums
-		global adc_avgs
 
 		adc_avgs = [sum/N_adc_samples for sum in adc_sums]
 		adc_sums = [0.0 for sum in adc_sums]
-		N_adc_samples = 0
 
 		if generate is True:
 			current = (3.3/(0.55 *100))*adc_avgs[0]
@@ -348,6 +348,8 @@ def update_dashboard_power():
 		print("ADC1: {d:.6f}, current: {c:2.4f} mA".format(d=adc_avgs[0], c=current*1000))
 		print("{n:2.4f} samples averaged\n" .format(n=N_adc_samples))
 		blynk_instance.virtual_write(POWER_VPIN, voltage*current)
+		
+		N_adc_samples = 0 #Must be after to print the accurate number of samples
 
 # sets up the system after a kill command is recieved / created
 def handle_kill_state_change():
@@ -382,19 +384,19 @@ def handle_generate_state_change():
 # SET UP BLYNK TIMER FOR PERIODIC EXECUTIONS
 
 blynk_update_timer = BlynkTimer.BlynkTimer()
-blynk_update_timer.set_interval(BLYNK_UPDATE_INTERVAL, update_dashboard_power())
+blynk_update_timer.set_interval(BLYNK_UPDATE_INTERVAL, update_dashboard_power)
 
 # SET UP HARDWARE TIMER TO SAMPLE ADCS PERIODICALLY
 
 # samples and sums ADC values for later averaging
-def sample_adcs():
+def sample_adcs(void):
 	global adc_sums
 	global adc
 	global N_adc_samples
 	adc_sums = [sum + source.read_u16()/65535.0 for sum, source in zip(adc_sums, adc)]
 	N_adc_samples = N_adc_samples + 1
 
-ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs())
+ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs)
 
 #########################################################################################
 ###################################### MAIN LOOP ########################################
