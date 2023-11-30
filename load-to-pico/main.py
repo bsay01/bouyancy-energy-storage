@@ -40,13 +40,14 @@ GENERATE_SWITCH_VPIN = 0
 POWER_VPIN = 1
 KILLSWITCH_VPIN = 2
 
-BLYNK_UPDATE_INTERVAL = 5 # seconds
+BLYNK_UPDATE_INTERVAL = 1 # seconds
 
 #### ADC globals ####
 ADC_UPDATE_INTERVAL = 20 # milliseconds
 N_adc_samples = 1 # number of ADC samples since last blynk update
 adc_sums = [0.0, 0.0] # sums of ADC samples for averaging
 adc_avgs = [0.0, 0.0] # ADC averages
+adc_max = 0
 
 #### WiFi Stuff ####
 
@@ -205,7 +206,10 @@ def connect_to_WiFi_network(ssid = 'SHAW-E8C2'):
     except:
         print("WIFI CONNECTION ERROR - CHECK NETWORK NAME OR PASSWORD")
     while not sta_if.isconnected():
-        print(sta_if.status())
+        stat = sta_if.status()
+        print(stat)
+        if stat is not (1 or 2):
+            sta_if.connect(ssid, known_wifi_passwords[ssid])
         sweep_LEDs(5)
     print("network connected!")
     print('network configuration: ', sta_if.ifconfig())
@@ -239,7 +243,7 @@ def move_stepper(steps_to_move = 200, CW = True, delay = MIN_STEP_DELAY):
 def calibrate_stepper():
     disable_generator()
     print("calibrating motor...")
-    move_stepper(23, True, MAX_STEP_DELAY)
+    move_stepper(23, True, 1)
     print("calibration complete! resetting...\n")
     utime.sleep_ms(500)
     move_stepper(18, False, MIN_STEP_DELAY)
@@ -334,6 +338,7 @@ def update_dashboard_power():
     global N_adc_samples
     global adc_sums
     global adc_avgs
+    global adc_max
     if N_adc_samples is 0:
         print("ADC averaging incomplete - dashboard not updated\n")
     else:
@@ -341,13 +346,15 @@ def update_dashboard_power():
         adc_sums = [0.0 for sum in adc_sums]
 
         if generate is True:
-            current = (3.3/(0.55 *100))*adc_avgs[0]
+            current = (3.3/(0.55*5))*adc_avgs[0]
             voltage = 4*3.3*adc_avgs[1]
             print("GENERATOR:")
+            print("max power: {p:.6f}".format(p=(3.3/(0.55*5))*4*3.3*adc_max))
         else:
-            current = (3.3/(0.5*10))*adc_avgs[0]
+            current = (3.3/(0.5*5))*adc_avgs[0]
             voltage = 4*3.3*adc_avgs[1]
             print("MOTOR:")
+            print("max power: {p:.6f}".format(p=(3.3/(0.5*5))*4*3.3*adc_max))
 
         print("ADC0: {d:.6f}, voltage: {v:2.4f} V  ".format(d=adc_avgs[1], v=voltage))
         print("ADC1: {d:.6f}, current: {c:2.4f} mA".format(d=adc_avgs[0], c=current*1000))
@@ -375,22 +382,25 @@ def handle_generate_state_change():
     global was_generating
     global N_adc_samples
     global adc_sums
+    global adc_max
     blynk_instance.virtual_write(GENERATE_SWITCH_VPIN, 1 if generate is True else 0)
     if generate is False:
         print("\nswitching to motor mode...\n")
         was_generating = True
+        send_stepper_signal([1, 0, 0, 1, 0, 0]) #SAM CHANGED THIS
         disable_generator()
         utime.sleep_ms(200)
     elif generate is True:
         print("\nswitching to generate mode...\n")
-        disable_stepper()
-        utime.sleep_ms(100)
+        #utime.sleep_ms(200)
         enable_generator()
-        utime.sleep_ms(100)
+        utime.sleep_ms(50)
+        disable_stepper()
         print()
     adc_sums[0] = 0
     adc_sums[1] = 0
     N_adc_samples = 0
+    adc_max = 0
 
 # SET UP BLYNK TIMER FOR PERIODIC EXECUTIONS
 
@@ -405,12 +415,17 @@ def sample_adcs(void):
     #global adc0
     #global adc1
     global N_adc_samples
+    global adc_max
     try:
-        #adc_sums = [sum + source.read_u16()/65535.0 for sum, source in zip(adc_sums, adc)]
-        adc_sums[0] = adc_sums[0] + adc0.read_u16()/65535
-        adc_sums[1] = adc_sums[1] + adc1.read_u16()/65535
+        a0 = adc0.read_u16()/65535
+        a1 = adc1.read_u16()/65535
+        adc_sums[0] = adc_sums[0] + a0
+        adc_sums[1] = adc_sums[1] + a1
+        p = a0 * a1
     except:
         raise Exception("ADC error")
+    if p > adc_max:
+        adc_max = p
     N_adc_samples = N_adc_samples + 1
 
 #ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs)
@@ -420,6 +435,7 @@ def sample_adcs(void):
 #########################################################################################
 
 def second_thread(bi, bt):
+    
     ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs)
     while True:
         bi.run()
@@ -442,7 +458,7 @@ while True:
         # if we are in motor mode and we were generating before
         if generate is False and was_generating is True:
 
-            #calibrate_stepper()
+            calibrate_stepper()
 
             # store a bunch of power and wait for the generate signal
             move_stepper(STEPS_TO_BOTTOM, SPIN_CW, MIN_STEP_DELAY)
