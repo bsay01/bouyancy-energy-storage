@@ -21,7 +21,7 @@
 
 """
 
-import utime, machine, BlynkLib, network, BlynkTimer, _thread
+import utime, machine, BlynkLib, network, BlynkTimer, _thread, sys
 
 #########################################################################################
 ####################################### DEFINES #########################################
@@ -39,26 +39,32 @@ BLYNK_AUTH_TOKEN = "NKV7_l21Ch2v0buSwwvqLU0zDpwA2dEP"
 GENERATE_SWITCH_VPIN = 0
 POWER_VPIN = 1
 KILLSWITCH_VPIN = 2
+MAX_POWER_VPIN = 3
+TOTAL_ENERGY_GENERATED_VPIN = 4
 
 BLYNK_UPDATE_INTERVAL = 1 # seconds
 
 #### ADC globals ####
 ADC_UPDATE_INTERVAL = 20 # milliseconds
-N_adc_samples = 1 # number of ADC samples since last blynk update
-adc_sums = [0.0, 0.0] # sums of ADC samples for averaging
-adc_avgs = [0.0, 0.0] # ADC averages
+N_adc_samples = 1        # number of ADC samples since last blynk update
+adc_sums = [0.0, 0.0]    # sums of ADC samples for averaging
+adc_avgs = [0.0, 0.0]    # ADC averages
 adc_max = 0
 energy_generated = 0
 
 #### WiFi Stuff ####
 
-WIFI_NAME = 'SHAW-E8C2'
+MAX_NETWORK_CONNECTION_ERRORS_ALLOWED = 5
+MAX_NETWORK_CONNECTION_ATTEMPTS_ALLOWED = 3
+
+WIFI_NAME = 'bens-surface'
 
 known_wifi_passwords = {
+    'bens-surface': 'wiggles101',       # ben's surface
+    'SHAW-E8C2': 'breezy2116fever',     # home network
     'the Groove Machine': 'wiggles101', # ben's phone
     'Liams Iphone XR': 'colemansgimp',  # liam's phone
-    'Lee': 'leeroijenkins',             # sam's phone
-    'SHAW-E8C2': 'breezy2116fever'      # home network
+    'Lee': 'leeroijenkins'              # sam's phone
 }
 
 #### Stepper Stuff ####
@@ -122,34 +128,12 @@ kill = False
 ###################################### FUNCTIONS ########################################
 #########################################################################################
 
+### LEDs ###
+
 def show_on_LEDs(list):
     global LED_pins
     for pin, value in zip(LED_pins, list):
         pin.value(value)
-
-def send_stepper_signal(list):
-    global stepper_pins
-    for pin, value in zip(stepper_pins, list):
-        pin.value(value)
-    show_on_LEDs([list[1], list[2], list[4], list[5]])
-
-def disable_generator():
-    RELAY1.value(0)
-    RELAY2.value(1)
-    print("generator disabled")
-
-def enable_generator():
-    RELAY1.value(1)
-    RELAY2.value(0)
-    print("generator enabled")
-
-def disable_stepper():
-    send_stepper_signal([0, 0, 0, 0, 0, 0])
-    print("stepper disabled")
-
-def brake_stepper():
-    send_stepper_signal([1, 0, 0, 1, 0, 0])
-    print("stepper braked")
 
 def flash_LEDs(times = 1, delay = 100):
     show_on_LEDs([0, 0, 0, 0])
@@ -170,6 +154,36 @@ def sweep_LEDs(times = 1, up = True, delay = 50):
             show_on_LEDs(L)
             utime.sleep_ms(delay)
     show_on_LEDs([0, 0, 0, 0])
+
+### RELAYS ###
+
+def disable_generator():
+    RELAY1.value(0)
+    RELAY2.value(1)
+    print("generator disabled")
+
+def enable_generator():
+    RELAY1.value(1)
+    RELAY2.value(0)
+    print("generator enabled")
+
+### STEPPER COMMUNICATION ###
+
+def send_stepper_signal(list):
+    global stepper_pins
+    for pin, value in zip(stepper_pins, list):
+        pin.value(value)
+    show_on_LEDs([list[1], list[2], list[4], list[5]])
+
+def disable_stepper():
+    send_stepper_signal([0, 0, 0, 0, 0, 0])
+    print("stepper disabled")
+
+def brake_stepper():
+    send_stepper_signal([1, 0, 0, 1, 0, 0])
+    print("stepper braked")
+
+### SHORTCUTS ###
 
 def initialize_hardware(step_delay = 200):
     print("beginning hardware setup process...")
@@ -198,24 +212,64 @@ def killswitch_pause():
     print("kill switch re-enabled")
     show_on_LEDs([0, 0, 0, 0])
 
-def connect_to_WiFi_network(ssid = 'SHAW-E8C2'):
+def connect_to_WiFi_network(ssid = 'bens-surface'):
+
     sta_if = network.WLAN(network.STA_IF)
+
     print('connecting to WiFi network "{}"...'.format(WIFI_NAME))
     sta_if.active(True)
+
+    errors_counted = 0
+    attempts = 1
+
     try:
         sta_if.connect(ssid, known_wifi_passwords[ssid])
     except:
-        print("WIFI CONNECTION ERROR - CHECK NETWORK NAME OR PASSWORD")
+        print("WIFI CONNECT EXCEPTION - on attempt {}".format(attempts))
+
     while not sta_if.isconnected():
+
         stat = sta_if.status()
-        print(stat)
-        if stat is not (1 or 2):
-            sta_if.connect(ssid, known_wifi_passwords[ssid])
-        sweep_LEDs(5)
+
+        if stat is network.STAT_IDLE:
+            print("idle...")
+        elif stat is network.STAT_GOT_IP:
+            print("IP recieved...")
+        elif stat is network.STAT_CONNECTING:
+            print("connecting...")
+        elif stat is network.STAT_NO_AP_FOUND:
+            print("ERROR: AP not found...")
+        elif stat is network.STAT_CONNECT_FAIL:
+            print("ERROR: misc. connection failure...")
+        elif stat is network.STAT_WRONG_PASSWORD:
+            print("ERROR: incorrect password error recieved...")
+        else:
+            print("ERROR: unknown network status case...")
+
+        if stat is not (network.STAT_IDLE or network.STAT_GOT_IP or network.STAT_CONNECTING):
+            if errors_counted >= MAX_NETWORK_CONNECTION_ERRORS_ALLOWED:
+                print("too many ({}) errors in a row. restarting connection...".format(errors_counted))
+                attempts = attempts + 1
+                errors_counted = 0
+                try:
+                    print("begin connection attempt {}...".format(attempts))
+                    sta_if.connect(ssid, known_wifi_passwords[ssid])
+                except:
+                    print("WIFI CONNECT EXCEPTION - on attempt {}".format(attempts))
+            else:
+                errors_counted = errors_counted + 1
+
+        if attempts >= MAX_NETWORK_CONNECTION_ATTEMPTS_ALLOWED:
+            print("network connection attempt limit reached ({}). restarting system.".format(attempts))
+            sys.exit()
+
+        sweep_LEDs(3)
+
     print("network connected!")
     print('network configuration: ', sta_if.ifconfig())
     print()
     sweep_LEDs(1, False)
+
     return sta_if
 
 def move_stepper(steps_to_move = 200, CW = True, delay = MIN_STEP_DELAY):
@@ -236,8 +290,6 @@ def move_stepper(steps_to_move = 200, CW = True, delay = MIN_STEP_DELAY):
         except:
             raise Exception("stepper_state case error: {}".format(stepper_state))
         utime.sleep_ms(delay)
-        #blynk_instance.run()
-        #blynk_update_timer.run()
 
     return True
 
@@ -288,10 +340,14 @@ sta_if = connect_to_WiFi_network(WIFI_NAME)
 #########################################################################################
 
 print("Initializing Blynk instance...")
-
+show_on_LEDs([1, 1, 1, 1])
 blynk_instance = BlynkLib.Blynk(BLYNK_AUTH_TOKEN, insecure = True)
-#ret = 0
+#blynk_instance = BlynkLib.Blynk(BLYNK_AUTH_TOKEN)
+show_on_LEDs([0, 0, 0, 0])
+
+# recursive blynk function... TODO: implement properly
 """
+#ret = 0
 def blynk_connect_recursive(bli_inst = 0):
     global BLYNK_AUTH_TOKEN
     #global ret
@@ -307,7 +363,6 @@ def blynk_connect_recursive(bli_inst = 0):
 
 blynk_instance = blynk_connect_recursive()
 """
-#blynk_instance = BlynkLib.Blynk(BLYNK_AUTH_TOKEN)
 
 # HANDLERS FOR DATA COMING FROM THE BLYNK DASHBOARD
 
@@ -351,120 +406,166 @@ def v0_write_handler(value):
 
 # HANDLERS FOR DATA GOING TO THE BLYNK DASHBOARD
 
-# updates the power label on the dashboard
+# updates labels on the dashboard
 def update_dashboard_power():
+
     global generate
     global N_adc_samples
     global adc_sums
     global adc_avgs
     global adc_max
     global energy_generated
+
     if N_adc_samples is 0:
+
         print("ADC averaging incomplete - dashboard not updated\n")
+
     else:
+
         adc_avgs = [sum/N_adc_samples for sum in adc_sums]
         adc_sums = [0.0 for sum in adc_sums]
 
+        w = 0
+
         if generate is True:
+
             current = (3.3/(0.55*5))*adc_avgs[0]
             voltage = 4*3.3*adc_avgs[1]
+
             print("GENERATOR:")
-            print("max power generated: {p:.6f} W".format(p=(3.3/(0.55*5))*4*3.3*adc_max))
+
+            w = (3.3/(0.55*5))*4*3.3*adc_max
+            print("max power generated: {p:.6f} W".format(p=w))
+
             energy_generated = energy_generated + voltage*current*BLYNK_UPDATE_INTERVAL
             print("total energy generated: {e:.6f} J".format(e=energy_generated))
+            blynk_instance.virtual_write(TOTAL_ENERGY_GENERATED_VPIN, energy_generated)
+
         else:
+
             current = (3.3/(0.5*5))*adc_avgs[0]
             voltage = 4*3.3*adc_avgs[1]
+
             print("MOTOR:")
-            print("max power used: {p:.6f} W".format(p=(3.3/(0.5*5))*4*3.3*adc_max))
+
+            w = (3.3/(0.5*5))*4*3.3*adc_max
+            print("max power used: {p:.6f} W".format(p=w))
 
         print("ADC0: {d:.6f}, voltage: {v:2.4f} V  ".format(d=adc_avgs[1], v=voltage))
         print("ADC1: {d:.6f}, current: {c:2.4f} mA".format(d=adc_avgs[0], c=current*1000))
         print("{n} samples averaged\n" .format(n=N_adc_samples))
+
         N_adc_samples = 0
+        blynk_instance.virtual_write(MAX_POWER_VPIN, w)
         blynk_instance.virtual_write(POWER_VPIN, voltage*current)
 
 # sets up the system after a kill command is recieved / created
 def handle_kill_state_change():
+
     global kill
     global generate
     global was_generating
+
     blynk_instance.virtual_write(KILLSWITCH_VPIN, 1 if kill is True else 0)
+
     if kill is True:
+
         print("\nSYSTEM KILL COMPLETE\n")
+
     elif kill is False:
+
         print("\nRESTARTING SYSTEM\n")
         initialize_hardware()
+
         generate = True
         was_generating = True
 
 # sets up the system after a generate / drive command is recieved / created
 def handle_generate_state_change():
+
     global generate
     global was_generating
     global N_adc_samples
     global adc_sums
     global adc_max
     global energy_generated
+
     blynk_instance.virtual_write(GENERATE_SWITCH_VPIN, 1 if generate is True else 0)
+
     if generate is False:
+
         print("\nswitching to motor mode...\n")
+
         was_generating = True
-        send_stepper_signal([1, 0, 0, 1, 0, 0]) #SAM CHANGED THIS
-        disable_generator()
-        utime.sleep_ms(200)
+        send_stepper_signal([1, 0, 0, 1, 0, 0]) # send active signal
+        disable_generator() # let active signal pass through
+
+        utime.sleep_ms(10) # wait for relays to close and then some
+
     elif generate is True:
+
         print("\nswitching to generate mode...\n")
-        #utime.sleep_ms(200)
-        enable_generator()
-        utime.sleep_ms(50)
-        disable_stepper()
+
+        enable_generator() # do this first so that no current flows back into motor controller
+        utime.sleep_ms(10) # wait for relays to open
+        disable_stepper()  # send stepper disable signal
+
         print()
+
     adc_sums[0] = 0
     adc_sums[1] = 0
     N_adc_samples = 0
     adc_max = 0
     energy_generated = 0
 
-# SET UP BLYNK TIMER FOR PERIODIC EXECUTIONS
-
-blynk_update_timer = BlynkTimer.BlynkTimer()
-blynk_update_timer.set_interval(BLYNK_UPDATE_INTERVAL, update_dashboard_power)
-
-# SET UP HARDWARE TIMER TO SAMPLE ADCS PERIODICALLY
-
 # samples and sums ADC values for later averaging
 def sample_adcs(void):
+
     global adc_sums
-    #global adc0
-    #global adc1
     global N_adc_samples
     global adc_max
+
     try:
+
         a0 = adc0.read_u16()/65535
         a1 = adc1.read_u16()/65535
+
         adc_sums[0] = adc_sums[0] + a0
         adc_sums[1] = adc_sums[1] + a1
+
         p = a0 * a1
+
     except:
+
         raise Exception("ADC error")
+
     if p > adc_max:
         adc_max = p
+
     N_adc_samples = N_adc_samples + 1
 
-#ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs)
+#########################################################################################
+############################## DEFINE AND START THREAD 2 ################################
+#########################################################################################
+
+def second_thread(bi):
+
+    # SET UP BLYNK TIMER FOR PERIODIC EXECUTIONS
+    blynk_update_timer = BlynkTimer.BlynkTimer()
+    blynk_update_timer.set_interval(BLYNK_UPDATE_INTERVAL, update_dashboard_power)
+
+    # SET UP HARDWARE TIMER TO SAMPLE ADCS PERIODICALLY
+    ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs)
+
+    while True:
+        bi.run()
+        blynk_update_timer.run()
+
+_thread.start_new_thread(second_thread, (blynk_instance))
 
 #########################################################################################
 ###################################### MAIN LOOP ########################################
 #########################################################################################
-
-def second_thread(bi, bt):
-    ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs)
-    while True:
-        bi.run()
-        bt.run()
-
-_thread.start_new_thread(second_thread, (blynk_instance, blynk_update_timer))
 
 while True:
 
@@ -485,9 +586,5 @@ while True:
 
             # store a bunch of power and wait for the generate signal
             move_stepper(STEPS_TO_BOTTOM, SPIN_CW, MIN_STEP_DELAY)
-            #brake_stepper()
-            was_generating = False
 
-    #utime.sleep_ms(20)
-    #blynk_instance.run()
-    #blynk_update_timer.run()
+            was_generating = False
