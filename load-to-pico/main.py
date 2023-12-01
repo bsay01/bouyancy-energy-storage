@@ -48,6 +48,7 @@ N_adc_samples = 1 # number of ADC samples since last blynk update
 adc_sums = [0.0, 0.0] # sums of ADC samples for averaging
 adc_avgs = [0.0, 0.0] # ADC averages
 adc_max = 0
+energy_generated = 0
 
 #### WiFi Stuff ####
 
@@ -62,10 +63,10 @@ known_wifi_passwords = {
 
 #### Stepper Stuff ####
 
-MIN_STEP_DELAY = 8
+MIN_STEP_DELAY = 6
 MAX_STEP_DELAY = 20
 
-STEPS_TO_BOTTOM = 2400
+STEPS_TO_BOTTOM = 4400
 SPIN_CW = False
 
 stepper_signals = {
@@ -254,14 +255,14 @@ def calibrate_stepper():
 #########################################################################################
 
 # deals with killswitch button trigger
-def killswitch_handler():
+def killswitch_handler(void):
     global kill
     killswitch_pause()
     kill = False if kill is True else True
     handle_kill_state_change()
 
 # deals with generate button trigger
-def generate_handler():
+def generate_handler(void):
     global generate
     print("\ngenerate button pressed, switching modes...")
     utime.sleep_ms(100)
@@ -287,7 +288,25 @@ sta_if = connect_to_WiFi_network(WIFI_NAME)
 #########################################################################################
 
 print("Initializing Blynk instance...")
+
 blynk_instance = BlynkLib.Blynk(BLYNK_AUTH_TOKEN, insecure = True)
+#ret = 0
+"""
+def blynk_connect_recursive(bli_inst = 0):
+    global BLYNK_AUTH_TOKEN
+    #global ret
+    ret = bli_inst
+    #if ret is not 0:
+    #    return ret
+    try:
+        bli_inst = BlynkLib.Blynk(BLYNK_AUTH_TOKEN, insecure = True)
+    except:
+        print("blynk connect error, trying again")
+        ret = blynk_connect_recursive(bli_inst)
+    return ret
+
+blynk_instance = blynk_connect_recursive()
+"""
 #blynk_instance = BlynkLib.Blynk(BLYNK_AUTH_TOKEN)
 
 # HANDLERS FOR DATA COMING FROM THE BLYNK DASHBOARD
@@ -339,6 +358,7 @@ def update_dashboard_power():
     global adc_sums
     global adc_avgs
     global adc_max
+    global energy_generated
     if N_adc_samples is 0:
         print("ADC averaging incomplete - dashboard not updated\n")
     else:
@@ -349,12 +369,14 @@ def update_dashboard_power():
             current = (3.3/(0.55*5))*adc_avgs[0]
             voltage = 4*3.3*adc_avgs[1]
             print("GENERATOR:")
-            print("max power: {p:.6f}".format(p=(3.3/(0.55*5))*4*3.3*adc_max))
+            print("max power generated: {p:.6f} W".format(p=(3.3/(0.55*5))*4*3.3*adc_max))
+            energy_generated = energy_generated + voltage*current*BLYNK_UPDATE_INTERVAL
+            print("total energy generated: {e:.6f} J".format(e=energy_generated))
         else:
             current = (3.3/(0.5*5))*adc_avgs[0]
             voltage = 4*3.3*adc_avgs[1]
             print("MOTOR:")
-            print("max power: {p:.6f}".format(p=(3.3/(0.5*5))*4*3.3*adc_max))
+            print("max power used: {p:.6f} W".format(p=(3.3/(0.5*5))*4*3.3*adc_max))
 
         print("ADC0: {d:.6f}, voltage: {v:2.4f} V  ".format(d=adc_avgs[1], v=voltage))
         print("ADC1: {d:.6f}, current: {c:2.4f} mA".format(d=adc_avgs[0], c=current*1000))
@@ -383,6 +405,7 @@ def handle_generate_state_change():
     global N_adc_samples
     global adc_sums
     global adc_max
+    global energy_generated
     blynk_instance.virtual_write(GENERATE_SWITCH_VPIN, 1 if generate is True else 0)
     if generate is False:
         print("\nswitching to motor mode...\n")
@@ -401,6 +424,7 @@ def handle_generate_state_change():
     adc_sums[1] = 0
     N_adc_samples = 0
     adc_max = 0
+    energy_generated = 0
 
 # SET UP BLYNK TIMER FOR PERIODIC EXECUTIONS
 
@@ -435,7 +459,6 @@ def sample_adcs(void):
 #########################################################################################
 
 def second_thread(bi, bt):
-    
     ADC_timer = machine.Timer(period = ADC_UPDATE_INTERVAL, mode = machine.Timer.PERIODIC, callback = sample_adcs)
     while True:
         bi.run()
