@@ -32,9 +32,9 @@ machine.enable_irq(interrupt_state)
 
 #### Blynk globals ####
 
-BLYNK_TEMPLATE_ID = "TMPL2UsApXL1s"
-BLYNK_TEMPLATE_NAME = "Quickstart Template"
-BLYNK_AUTH_TOKEN = "NKV7_l21Ch2v0buSwwvqLU0zDpwA2dEP"
+BLYNK_TEMPLATE_ID = ""
+BLYNK_TEMPLATE_NAME = ""
+BLYNK_AUTH_TOKEN = ""
 
 GENERATE_SWITCH_VPIN = 0
 POWER_VPIN = 1
@@ -57,14 +57,10 @@ energy_generated = 0
 MAX_NETWORK_CONNECTION_ERRORS_ALLOWED = 5
 MAX_NETWORK_CONNECTION_ATTEMPTS_ALLOWED = 3
 
-WIFI_NAME =  'Lee'
+WIFI_NAME =  'ssid'
 
 known_wifi_passwords = {
-    'bens-surface': 'wiggles101',       # ben's surface
-    'SHAW-E8C2': 'breezy2116fever',     # home network
-    'the Groove Machine': 'wiggles101', # ben's phone
-    'Liams Iphone XR': 'colemansgimp',  # liam's phone
-    'Lee': 'leeroijenkins'              # sam's phone
+    'ssid': 'password'
 }
 
 #### Stepper Stuff ####
@@ -212,7 +208,7 @@ def killswitch_pause():
     print("kill switch re-enabled")
     show_on_LEDs([0, 0, 0, 0])
 
-def connect_to_WiFi_network(ssid = 'bens-surface'):
+def connect_to_WiFi_network(ssid = WIFI_NAME):
 
     sta_if = network.WLAN(network.STA_IF)
 
@@ -344,25 +340,6 @@ show_on_LEDs([1, 1, 1, 1])
 blynk_instance = BlynkLib.Blynk(BLYNK_AUTH_TOKEN, insecure = True)
 #blynk_instance = BlynkLib.Blynk(BLYNK_AUTH_TOKEN)
 show_on_LEDs([0, 0, 0, 0])
-
-# recursive blynk function... TODO: implement properly
-"""
-#ret = 0
-def blynk_connect_recursive(bli_inst = 0):
-    global BLYNK_AUTH_TOKEN
-    #global ret
-    ret = bli_inst
-    #if ret is not 0:
-    #    return ret
-    try:
-        bli_inst = BlynkLib.Blynk(BLYNK_AUTH_TOKEN, insecure = True)
-    except:
-        print("blynk connect error, trying again")
-        ret = blynk_connect_recursive(bli_inst)
-    return ret
-
-blynk_instance = blynk_connect_recursive()
-"""
 
 # HANDLERS FOR DATA COMING FROM THE BLYNK DASHBOARD
 
