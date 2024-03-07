@@ -57,7 +57,7 @@ energy_generated = 0
 MAX_NETWORK_CONNECTION_ERRORS_ALLOWED = 5
 MAX_NETWORK_CONNECTION_ATTEMPTS_ALLOWED = 3
 
-WIFI_NAME = 'bens-surface'
+WIFI_NAME =  'Lee'
 
 known_wifi_passwords = {
     'bens-surface': 'wiggles101',       # ben's surface
@@ -72,7 +72,7 @@ known_wifi_passwords = {
 MIN_STEP_DELAY = 6
 MAX_STEP_DELAY = 20
 
-STEPS_TO_BOTTOM = 4400
+STEPS_TO_BOTTOM = 4800
 SPIN_CW = False
 
 stepper_signals = {
@@ -263,7 +263,7 @@ def connect_to_WiFi_network(ssid = 'bens-surface'):
             print("network connection attempt limit reached ({}). restarting system.".format(attempts))
             sys.exit()
 
-        sweep_LEDs(3)
+        sweep_LEDs(7)
 
     print("network connected!")
     print('network configuration: ', sta_if.ifconfig())
@@ -296,7 +296,7 @@ def move_stepper(steps_to_move = 200, CW = True, delay = MIN_STEP_DELAY):
 def calibrate_stepper():
     disable_generator()
     print("calibrating motor...")
-    move_stepper(23, True, 1)
+    move_stepper(67, True, 1)
     print("calibration complete! resetting...\n")
     utime.sleep_ms(500)
     move_stepper(18, False, MIN_STEP_DELAY)
@@ -475,6 +475,7 @@ def handle_kill_state_change():
     elif kill is False:
 
         print("\nRESTARTING SYSTEM\n")
+        sys.exit()
         initialize_hardware()
 
         generate = True
@@ -548,7 +549,7 @@ def sample_adcs(void):
 ############################## DEFINE AND START THREAD 2 ################################
 #########################################################################################
 
-def second_thread(bi):
+def second_thread(bi, j):
 
     # SET UP BLYNK TIMER FOR PERIODIC EXECUTIONS
     blynk_update_timer = BlynkTimer.BlynkTimer()
@@ -561,7 +562,7 @@ def second_thread(bi):
         bi.run()
         blynk_update_timer.run()
 
-_thread.start_new_thread(second_thread, (blynk_instance))
+_thread.start_new_thread(second_thread, (blynk_instance, 1))
 
 #########################################################################################
 ###################################### MAIN LOOP ########################################
